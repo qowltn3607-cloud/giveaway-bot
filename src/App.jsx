@@ -73,56 +73,39 @@ export default function GiveawayBot() {
     return Object.keys(e).length === 0;
   };
 
-  // 웹 서칭 포함 API 호출 — tool_use 루프 처리
+  // 웹 서칭 포함 API 호출
   const callAPI = async (history) => {
-    let currentMessages = [...history];
     setSearchingWeb(false);
 
-    while (true) {
-      const res = await fetch("/api/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: buildSystemPrompt(formData),
-          tools: [WEB_SEARCH_TOOL],
-          messages: currentMessages,
-        }),
-      });
+    const res = await fetch("/api/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1000,
+        system: buildSystemPrompt(formData),
+        tools: [WEB_SEARCH_TOOL],
+        messages: history,
+      }),
+    });
 
-      const data = await res.json();
-      const { content, stop_reason } = data;
+    const data = await res.json();
 
-      // 텍스트만 추출
-      const textBlocks = content.filter(b => b.type === "text");
-      const toolUseBlocks = content.filter(b => b.type === "tool_use");
+    // API 에러 체크
+    if (data.error) throw new Error(data.error.message || "API 오류");
 
-      // 검색 중 표시
-      if (toolUseBlocks.length > 0) {
-        setSearchingWeb(true);
-      }
+    // 검색 여부 감지
+    const hasSearch = data.content?.some(b => b.type === "tool_use" || b.type === "web_search_tool_result");
+    if (hasSearch) setSearchingWeb(true);
 
-      // 최종 응답 (end_turn)
-      if (stop_reason === "end_turn" || toolUseBlocks.length === 0) {
-        setSearchingWeb(false);
-        return textBlocks.map(b => b.text).join("") || "응답을 받지 못했어요.";
-      }
+    // 텍스트 추출
+    const text = data.content
+      ?.filter(b => b.type === "text")
+      .map(b => b.text)
+      .join("") || "";
 
-      // tool_use → tool_result 추가 후 루프 계속
-      currentMessages = [
-        ...currentMessages,
-        { role: "assistant", content },
-        {
-          role: "user",
-          content: toolUseBlocks.map(tb => ({
-            type: "tool_result",
-            tool_use_id: tb.id,
-            content: tb.input?.query ? `Searched: ${tb.input.query}` : "search completed",
-          })),
-        },
-      ];
-    }
+    setSearchingWeb(false);
+    return text || "응답을 받지 못했어요.";
   };
 
   const handleFormSubmit = async () => {
